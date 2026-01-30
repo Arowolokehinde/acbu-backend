@@ -1,0 +1,109 @@
+/**
+ * GET /v1/rates - Return current ACBU rates (from AcbuRate and OracleRate).
+ * GET /v1/rates/quote - Return equivalent value for a given ACBU amount and optional target currency.
+ */
+import { Request, Response, NextFunction } from 'express';
+import { prisma } from '../config/database';
+
+export async function getRates(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const latest = await prisma.acbuRate.findFirst({
+      orderBy: { timestamp: 'desc' },
+    });
+    if (!latest) {
+      res.status(200).json({
+        acbu_usd: null,
+        acbu_eur: null,
+        acbu_ngn: null,
+        acbu_kes: null,
+        acbu_rwf: null,
+        change_24h_usd: null,
+        timestamp: new Date().toISOString(),
+        message: 'No rate data yet; oracle integration will populate.',
+      });
+      return;
+    }
+    res.status(200).json({
+      acbu_usd: latest.acbuUsd.toString(),
+      acbu_eur: latest.acbuEur?.toString() ?? null,
+      acbu_gbp: latest.acbuGbp?.toString() ?? null,
+      acbu_ngn: latest.acbuNgn?.toString() ?? null,
+      acbu_kes: latest.acbuKes?.toString() ?? null,
+      acbu_zar: latest.acbuZar?.toString() ?? null,
+      acbu_rwf: latest.acbuRwf?.toString() ?? null,
+      acbu_ghs: latest.acbuGhs?.toString() ?? null,
+      acbu_egp: latest.acbuEgp?.toString() ?? null,
+      acbu_mad: latest.acbuMad?.toString() ?? null,
+      acbu_tzs: latest.acbuTzs?.toString() ?? null,
+      acbu_ugx: latest.acbuUgx?.toString() ?? null,
+      acbu_xof: latest.acbuXof?.toString() ?? null,
+      change_24h_usd: latest.change24hUsd?.toString() ?? null,
+      timestamp: latest.timestamp.toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * GET /v1/rates/quote?amount=500&target=NGN
+ * Returns equivalent value for amount ACBU in target currency (and USD).
+ */
+export async function getRatesQuote(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const amount = Math.max(0, Number(req.query.amount) || 0);
+
+    const latest = await prisma.acbuRate.findFirst({
+      orderBy: { timestamp: 'desc' },
+    });
+    if (!latest) {
+      res.status(200).json({
+        amount_acbu: amount,
+        equivalent: {},
+        timestamp: new Date().toISOString(),
+        message: 'No rate data yet.',
+      });
+      return;
+    }
+
+    const equivalent: Record<string, string> = {};
+    const acbuUsd = latest.acbuUsd.toNumber();
+    equivalent.USD = (amount * acbuUsd).toFixed(2);
+
+    const rates: { code: string; val: number | null }[] = [
+      { code: 'EUR', val: latest.acbuEur?.toNumber() ?? null },
+      { code: 'GBP', val: latest.acbuGbp?.toNumber() ?? null },
+      { code: 'NGN', val: latest.acbuNgn?.toNumber() ?? null },
+      { code: 'KES', val: latest.acbuKes?.toNumber() ?? null },
+      { code: 'ZAR', val: latest.acbuZar?.toNumber() ?? null },
+      { code: 'RWF', val: latest.acbuRwf?.toNumber() ?? null },
+      { code: 'GHS', val: latest.acbuGhs?.toNumber() ?? null },
+      { code: 'EGP', val: latest.acbuEgp?.toNumber() ?? null },
+      { code: 'MAD', val: latest.acbuMad?.toNumber() ?? null },
+      { code: 'TZS', val: latest.acbuTzs?.toNumber() ?? null },
+      { code: 'UGX', val: latest.acbuUgx?.toNumber() ?? null },
+      { code: 'XOF', val: latest.acbuXof?.toNumber() ?? null },
+    ];
+    for (const { code, val } of rates) {
+      if (val != null && val > 0) {
+        equivalent[code] = (amount * val).toFixed(2);
+      }
+    }
+
+    res.status(200).json({
+      amount_acbu: amount,
+      equivalent,
+      timestamp: latest.timestamp.toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+}

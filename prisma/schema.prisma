@@ -1,0 +1,436 @@
+// Prisma schema for ACBU platform
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   String    @id @default(uuid()) @db.Uuid
+  stellarAddress       String    @unique @db.VarChar(56)
+  kycStatus            String    @default("pending") @db.VarChar(20)
+  kycVerifiedAt        DateTime? @map("kyc_verified_at") @db.Timestamp
+  countryCode          String?   @map("country_code") @db.VarChar(3)
+  username             String?   @unique @db.VarChar(64)
+  phoneE164            String?   @unique @map("phone_e164") @db.VarChar(20)
+  email                String?   @unique @db.VarChar(255)
+  emailVerifiedAt      DateTime? @map("email_verified_at") @db.Timestamp
+  phoneVerifiedAt      DateTime? @map("phone_verified_at") @db.Timestamp
+  privacyHideFromSearch Boolean  @default(true) @map("privacy_hide_from_search") @db.Boolean
+  passcodeHash         String?   @map("passcode_hash") @db.VarChar(255)
+  encryptedStellarSecret String? @map("encrypted_stellar_secret") @db.VarChar(512)
+  keyEncryptionHint    String?   @map("key_encryption_hint") @db.VarChar(50)
+  twoFaMethod          String?   @map("two_fa_method") @db.VarChar(20) // 'totp' | 'sms' | 'email'
+  totpSecretEncrypted  String?   @map("totp_secret_encrypted") @db.VarChar(512)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  transactions    Transaction[]
+  otpChallenges   OtpChallenge[]
+  apiKeys         ApiKey[]
+  kycApplications KycApplication[]
+  kycValidators   KycValidator[]
+  passkeys        UserPasskey[]
+  guardians       Guardian[]         @relation("UserGuardians")
+  wardGuardians   Guardian[]         @relation("GuardianWard")
+  contacts        UserContact[]      @relation("UserContacts")
+  contactOf       UserContact[]      @relation("ContactOf")
+
+  @@index([stellarAddress], name: "idx_stellar_address")
+  @@index([username], name: "idx_username")
+  @@index([phoneE164], name: "idx_phone_e164")
+  @@index([email], name: "idx_email")
+  @@map("users")
+}
+
+model Transaction {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String?   @map("user_id") @db.Uuid
+  type              String    @db.VarChar(20) // 'mint', 'burn', 'transfer'
+  status            String    @default("pending") @db.VarChar(20) // 'pending', 'processing', 'completed', 'failed'
+
+  // Mint fields
+  usdcAmount        Decimal?  @map("usdc_amount") @db.Decimal(20, 8)
+  acbuAmount        Decimal?  @map("acbu_amount") @db.Decimal(20, 8)
+
+  // Burn fields
+  acbuAmountBurned  Decimal?  @map("acbu_amount_burned") @db.Decimal(20, 8)
+  localCurrency     String?   @map("local_currency") @db.VarChar(3)
+  localAmount       Decimal?  @map("local_amount") @db.Decimal(20, 2)
+  recipientAccount  Json?     @map("recipient_account")
+
+  // Transfer fields
+  recipientAddress  String?   @map("recipient_address") @db.VarChar(56)
+
+  fee               Decimal?  @db.Decimal(20, 8)
+  rateSnapshot      Json?     @map("rate_snapshot")
+  blockchainTxHash  String?   @map("blockchain_tx_hash") @db.VarChar(255)
+  confirmations     Int       @default(0)
+
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamp
+  completedAt       DateTime? @map("completed_at") @db.Timestamp
+
+  user              User?     @relation(fields: [userId], references: [id])
+  reserveHistory    ReserveHistory[]
+  webhooks          Webhook[]
+
+  @@index([userId], name: "idx_transactions_user_id")
+  @@index([type], name: "idx_transactions_type")
+  @@index([status], name: "idx_transactions_status")
+  @@index([createdAt], name: "idx_transactions_created_at")
+  @@index([userId, type], name: "idx_transactions_user_type")
+  @@index([status, createdAt], name: "idx_transactions_status_created")
+  @@map("transactions")
+}
+
+model Reserve {
+  id              String    @id @default(uuid()) @db.Uuid
+  currency        String    @db.VarChar(3)
+  targetWeight    Decimal   @map("target_weight") @db.Decimal(5, 2)
+  actualWeight    Decimal   @map("actual_weight") @db.Decimal(5, 2)
+  reserveAmount   Decimal   @map("reserve_amount") @db.Decimal(20, 2)
+  reserveValueUsd Decimal   @map("reserve_value_usd") @db.Decimal(20, 2)
+  timestamp       DateTime  @default(now()) @db.Timestamp
+
+  @@unique([currency, timestamp])
+  @@index([currency], name: "idx_reserves_currency")
+  @@index([timestamp], name: "idx_reserves_timestamp")
+  @@index([currency, timestamp(sort: Desc)], name: "idx_reserves_currency_timestamp")
+  @@map("reserves")
+}
+
+model ReserveHistory {
+  id            String      @id @default(uuid()) @db.Uuid
+  currency      String      @db.VarChar(3)
+  amountChange  Decimal     @map("amount_change") @db.Decimal(20, 2)
+  reason        String?     @db.VarChar(100) // 'mint', 'burn', 'rebalance', 'conversion'
+  transactionId String?     @map("transaction_id") @db.Uuid
+  previousAmount Decimal?   @map("previous_amount") @db.Decimal(20, 2)
+  newAmount     Decimal?    @map("new_amount") @db.Decimal(20, 2)
+  timestamp     DateTime    @default(now()) @db.Timestamp
+
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+
+  @@index([currency], name: "idx_reserve_history_currency")
+  @@index([timestamp], name: "idx_reserve_history_timestamp")
+  @@index([transactionId], name: "idx_reserve_history_transaction_id")
+  @@map("reserve_history")
+}
+
+model OracleRate {
+  id                  String    @id @default(uuid()) @db.Uuid
+  currency            String    @db.VarChar(3)
+  rateUsd            Decimal   @map("rate_usd") @db.Decimal(20, 8)
+
+  centralBankRate     Decimal?  @map("central_bank_rate") @db.Decimal(20, 8)
+  fintechRate         Decimal?  @map("fintech_rate") @db.Decimal(20, 8)
+  forexRate           Decimal?  @map("forex_rate") @db.Decimal(20, 8)
+  medianRate          Decimal   @map("median_rate") @db.Decimal(20, 8)
+  twap24h             Decimal?  @map("twap_24h") @db.Decimal(20, 8)
+  validatorSignatures Json?     @map("validator_signatures")
+  timestamp           DateTime  @default(now()) @db.Timestamp
+
+  @@unique([currency, timestamp])
+  @@index([currency], name: "idx_oracle_rates_currency")
+  @@index([timestamp], name: "idx_oracle_rates_timestamp")
+  @@map("oracle_rates")
+}
+
+model AcbuRate {
+  id          String    @id @default(uuid()) @db.Uuid
+  acbuUsd     Decimal   @map("acbu_usd") @db.Decimal(20, 8)
+  acbuEur     Decimal?  @map("acbu_eur") @db.Decimal(20, 8)
+  acbuGbp     Decimal?  @map("acbu_gbp") @db.Decimal(20, 8)
+  acbuNgn     Decimal?  @map("acbu_ngn") @db.Decimal(20, 2)
+  acbuKes     Decimal?  @map("acbu_kes") @db.Decimal(20, 2)
+  acbuZar     Decimal?  @map("acbu_zar") @db.Decimal(20, 2)
+  acbuRwf     Decimal?  @map("acbu_rwf") @db.Decimal(20, 2)
+  acbuGhs     Decimal?  @map("acbu_ghs") @db.Decimal(20, 2)
+  acbuEgp     Decimal?  @map("acbu_egp") @db.Decimal(20, 2)
+  acbuMad     Decimal?  @map("acbu_mad") @db.Decimal(20, 2)
+  acbuTzs     Decimal?  @map("acbu_tzs") @db.Decimal(20, 2)
+  acbuUgx     Decimal?  @map("acbu_ugx") @db.Decimal(20, 2)
+  acbuXof     Decimal?  @map("acbu_xof") @db.Decimal(20, 2)
+  change24hUsd Decimal? @map("change_24h_usd") @db.Decimal(5, 2)
+  timestamp   DateTime  @default(now()) @db.Timestamp
+
+  @@index([timestamp], name: "idx_acbu_rates_timestamp")
+  @@map("acbu_rates")
+}
+
+/// Metrics for basket weight calculation (GDP, trade, liquidity). External APIs + internal data.
+model BasketMetrics {
+  id             String    @id @default(uuid()) @db.Uuid
+  currency       String    @db.VarChar(3)
+  period         String    @db.VarChar(20)
+  gdpScore       Decimal?  @map("gdp_score") @db.Decimal(10, 4)
+  tradeScore     Decimal?  @map("trade_score") @db.Decimal(10, 4)
+  liquidityScore Decimal?  @map("liquidity_score") @db.Decimal(10, 4)
+  rawValues      Json?     @map("raw_values") @db.JsonB
+  source         String?   @db.VarChar(100)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamp
+
+  @@unique([currency, period])
+  @@index([currency], name: "idx_basket_metrics_currency")
+  @@index([period], name: "idx_basket_metrics_period")
+  @@map("basket_metrics")
+}
+
+/// Current basket composition (currencies + weights). Source of truth for reserve/oracle/rebalancing.
+/// One row per currency per version; weights from stats + DAO, not hardcoded.
+model BasketConfig {
+  id            String    @id @default(uuid()) @db.Uuid
+  effectiveFrom DateTime  @map("effective_from") @db.Timestamp
+  currency      String    @db.VarChar(3)
+  weight        Decimal   @db.Decimal(5, 2)
+  proposalId    String?   @map("proposal_id") @db.Uuid
+  status        String    @db.VarChar(20) // proposed | approved | active
+
+  @@unique([effectiveFrom, currency])
+  @@index([status], name: "idx_basket_config_status")
+  @@index([effectiveFrom], name: "idx_basket_config_effective_from")
+  @@index([status, effectiveFrom(sort: Desc)], name: "idx_basket_config_current")
+  @@map("basket_config")
+}
+
+model RebalancingEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  type        String    @db.VarChar(20)
+  status      String    @default("pending") @db.VarChar(20)
+  adjustments Json?
+  startedAt   DateTime  @default(now()) @map("started_at") @db.Timestamp
+  completedAt DateTime? @map("completed_at") @db.Timestamp
+
+  @@index([type], name: "idx_rebalancing_events_type")
+  @@index([status], name: "idx_rebalancing_events_status")
+  @@index([startedAt], name: "idx_rebalancing_events_started_at")
+  @@map("rebalancing_events")
+}
+
+model AuditTrail {
+  id          String    @id @default(uuid()) @db.Uuid
+  eventType   String    @map("event_type") @db.VarChar(50)
+  entityType  String?   @map("entity_type") @db.VarChar(50)
+  entityId    String?   @map("entity_id") @db.Uuid
+  action      String    @db.VarChar(50)
+  oldValue    Json?     @map("old_value")
+  newValue    Json?     @map("new_value")
+  performedBy String?  @map("performed_by") @db.Uuid
+  timestamp   DateTime  @default(now()) @db.Timestamp
+
+  @@index([eventType], name: "idx_audit_trail_event_type")
+  @@index([entityType], name: "idx_audit_trail_entity_type")
+  @@index([entityId], name: "idx_audit_trail_entity_id")
+  @@index([timestamp], name: "idx_audit_trail_timestamp")
+  @@map("audit_trail")
+}
+
+model Webhook {
+  id            String      @id @default(uuid()) @db.Uuid
+  transactionId String?     @map("transaction_id") @db.Uuid
+  eventType     String      @map("event_type") @db.VarChar(50)
+  payload       Json
+  signature     String?     @db.VarChar(255)
+  status        String      @default("pending") @db.VarChar(20)
+  attempts      Int         @default(0)
+  lastAttemptAt DateTime?   @map("last_attempt_at") @db.Timestamp
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamp
+
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+
+  @@index([transactionId], name: "idx_webhooks_transaction_id")
+  @@index([status], name: "idx_webhooks_status")
+  @@map("webhooks")
+}
+
+model ApiKey {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String?   @map("user_id") @db.Uuid
+  keyHash     String    @unique @map("key_hash") @db.VarChar(255)
+  permissions Json?
+  rateLimit   Int       @default(100) @map("rate_limit")
+  lastUsedAt  DateTime? @map("last_used_at") @db.Timestamp
+  expiresAt   DateTime? @map("expires_at") @db.Timestamp
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamp
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamp
+
+  user        User?     @relation(fields: [userId], references: [id])
+
+  @@index([userId], name: "idx_api_keys_user_id")
+  @@index([keyHash], name: "idx_api_keys_key_hash")
+  @@map("api_keys")
+}
+
+// --- Identity, passkey, guardians ---
+
+model UserPasskey {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  credentialId String   @unique @map("credential_id") @db.VarChar(512)
+  publicKey    String   @map("public_key") @db.Text
+  deviceName   String?  @map("device_name") @db.VarChar(100)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], name: "idx_user_passkey_user_id")
+  @@map("user_passkeys")
+}
+
+model Guardian {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  guardianUserId  String?   @map("guardian_user_id") @db.Uuid
+  guardianEmail   String?   @map("guardian_email") @db.VarChar(255)
+  guardianPhone   String?   @map("guardian_phone") @db.VarChar(20)
+  status          String    @default("pending") @db.VarChar(20)
+  order           Int       @default(0) @db.SmallInt
+  invitedAt       DateTime  @default(now()) @map("invited_at") @db.Timestamp
+  approvedAt      DateTime? @map("approved_at") @db.Timestamp
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  user         User  @relation("UserGuardians", fields: [userId], references: [id], onDelete: Cascade)
+  guardianUser User? @relation("GuardianWard", fields: [guardianUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId], name: "idx_guardian_user_id")
+  @@index([guardianUserId], name: "idx_guardian_guardian_user_id")
+  @@map("guardians")
+}
+
+model UserContact {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  contactUserId  String?  @map("contact_user_id") @db.Uuid
+  contactUsername String? @map("contact_username") @db.VarChar(64)
+  contactPhoneE164 String? @map("contact_phone_e164") @db.VarChar(20)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamp
+
+  user        User  @relation("UserContacts", fields: [userId], references: [id], onDelete: Cascade)
+  contactUser User? @relation("ContactOf", fields: [contactUserId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, contactUserId])
+  @@index([userId], name: "idx_user_contact_user_id")
+  @@index([contactUserId], name: "idx_user_contact_contact_user_id")
+  @@map("user_contacts")
+}
+
+model OtpChallenge {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  codeHash  String   @map("code_hash") @db.VarChar(255)
+  channel   String   @db.VarChar(20) // 'sms' | 'email'
+  expiresAt DateTime @map("expires_at") @db.Timestamp
+  usedAt    DateTime? @map("used_at") @db.Timestamp
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], name: "idx_otp_challenge_user_id")
+  @@index([expiresAt], name: "idx_otp_challenge_expires_at")
+  @@map("otp_challenges")
+}
+
+// --- KYC (Pi-style two-layer) ---
+
+model KycApplication {
+  id                    String    @id @default(uuid()) @db.Uuid
+  userId                String    @map("user_id") @db.Uuid
+  countryCode           String    @map("country_code") @db.VarChar(3)
+  status                String    @db.VarChar(20)
+  feePaidAcbu           Decimal   @map("fee_paid_acbu") @db.Decimal(20, 8)
+  feeTxHash             String?   @map("fee_tx_hash") @db.VarChar(255)
+  feeMintTransactionId  String?   @map("fee_mint_transaction_id") @db.Uuid
+  machineConfidence     Decimal?  @map("machine_confidence") @db.Decimal(3, 2)
+  machineRedactedPayload Json?    @map("machine_redacted_payload")
+  machineExtractedPayload Json?   @map("machine_extracted_payload")
+  rejectionReason       String?   @map("rejection_reason") @db.VarChar(500)
+  resolvedAt            DateTime? @map("resolved_at") @db.Timestamp
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents    KycDocument[]
+  validations  KycValidation[]
+  rewards      KycValidatorReward[]
+
+  @@index([userId], name: "idx_kyc_application_user_id")
+  @@index([status], name: "idx_kyc_application_status")
+  @@index([countryCode], name: "idx_kyc_application_country")
+  @@index([createdAt], name: "idx_kyc_application_created_at")
+  @@map("kyc_applications")
+}
+
+model KycDocument {
+  id            String   @id @default(uuid()) @db.Uuid
+  applicationId String   @map("application_id") @db.Uuid
+  kind          String   @db.VarChar(20)
+  storageRef    String   @map("storage_ref") @db.VarChar(512)
+  checksum      String?  @db.VarChar(64)
+  mimeType      String?  @map("mime_type") @db.VarChar(100)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamp
+
+  application KycApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId], name: "idx_kyc_document_application_id")
+  @@map("kyc_documents")
+}
+
+model KycValidator {
+  id                   String    @id @default(uuid()) @db.Uuid
+  userId               String    @map("user_id") @db.Uuid
+  countryCode          String    @map("country_code") @db.VarChar(3)
+  status               String    @db.VarChar(20)
+  accuracyScore        Decimal   @default(1) @map("accuracy_score") @db.Decimal(3, 2)
+  completedCount       Int       @default(0) @map("completed_count")
+  agreementAcceptedAt  DateTime? @map("agreement_accepted_at") @db.Timestamp
+  trainingCompletedAt  DateTime? @map("training_completed_at") @db.Timestamp
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  validations  KycValidation[]
+  rewards      KycValidatorReward[]
+
+  @@unique([userId, countryCode])
+  @@index([countryCode], name: "idx_kyc_validator_country")
+  @@index([status], name: "idx_kyc_validator_status")
+  @@map("kyc_validators")
+}
+
+model KycValidation {
+  id            String   @id @default(uuid()) @db.Uuid
+  applicationId String   @map("application_id") @db.Uuid
+  validatorId   String   @map("validator_id") @db.Uuid
+  result        String   @db.VarChar(20) // pending, approve, reject
+  notes         String?  @db.VarChar(500)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamp
+
+  application KycApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  validator   KycValidator   @relation(fields: [validatorId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId], name: "idx_kyc_validation_application_id")
+  @@index([validatorId], name: "idx_kyc_validation_validator_id")
+  @@map("kyc_validations")
+}
+
+model KycValidatorReward {
+  id           String   @id @default(uuid()) @db.Uuid
+  validatorId  String   @map("validator_id") @db.Uuid
+  applicationId String   @map("application_id") @db.Uuid
+  acbuAmount   Decimal  @map("acbu_amount") @db.Decimal(20, 8)
+  txHash       String?  @map("tx_hash") @db.VarChar(255)
+  status       String   @db.VarChar(20)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp
+
+  validator   KycValidator   @relation(fields: [validatorId], references: [id], onDelete: Cascade)
+  application KycApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([validatorId], name: "idx_kyc_validator_reward_validator_id")
+  @@index([applicationId], name: "idx_kyc_validator_reward_application_id")
+  @@index([status], name: "idx_kyc_validator_reward_status")
+  @@map("kyc_validator_rewards")
+}

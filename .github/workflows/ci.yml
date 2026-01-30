@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: acbu_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Format check
+        run: pnpm run format:check
+
+      - name: Generate Prisma Client
+        run: pnpm run prisma:generate
+
+      - name: Run tests
+        run: pnpm test
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/acbu_test
+          MONGODB_URI: mongodb://localhost:27017/acbu_test
+          RABBITMQ_URL: amqp://guest:guest@localhost:5672
+          JWT_SECRET: test-jwt-secret-for-ci
+          API_KEY_SALT: test-api-key-salt
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Validate migrations
+        run: pnpm run prisma:migrate:deploy
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/acbu_test

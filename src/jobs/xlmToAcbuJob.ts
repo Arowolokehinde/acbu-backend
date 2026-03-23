@@ -11,8 +11,38 @@ import { mintFromUsdcInternal } from '../controllers/mintController';
 
 const QUEUE = QUEUES.XLM_TO_ACBU;
 
-/** Stub: XLM to USD rate (replace with oracle/DEX in production). */
-const XLM_USD_RATE = Number(process.env.XLM_USD_RATE ?? '0.2');
+import axios from 'axios';
+
+/**
+ * Fetch live XLM to USD rate.
+ * Tries Binance API, then Database, then falls back to env process variables.
+ */
+async function getXlmUsdRate(): Promise<number> {
+  try {
+    const { data } = await axios.get('https://api.binance.com/api/v3/ticker/price?symbol=XLMUSDT', { timeout: 5000 });
+    if (data && data.price) {
+      return parseFloat(data.price);
+    }
+  } catch (err: any) {
+    logger.warn('Failed to fetch XLM rate from Binance', { error: err.message });
+  }
+
+  // Try DB fallback if an oracle job tracks it
+  try {
+    const dbRate = await prisma.oracleRate.findFirst({
+      where: { currency: 'XLM' },
+      orderBy: { timestamp: 'desc' },
+    });
+    if (dbRate && dbRate.medianRate) {
+      return dbRate.medianRate.toNumber();
+    }
+  } catch (err) {
+    logger.warn('Failed to fetch XLM rate from DB', { error: err });
+  }
+
+  // Fallback to env/default dynamically per call
+  return Number(process.env.XLM_USD_RATE ?? '0.2');
+}
 
 export interface XlmToAcbuPayload {
   onRampSwapId: string;
@@ -50,10 +80,13 @@ export async function startXlmToAcbuConsumer(): Promise<void> {
 export async function processXlmToAcbu(payload: XlmToAcbuPayload): Promise<void> {
   const { onRampSwapId, userId, stellarAddress, xlmAmount, usdcEquivalent } = payload;
   const xlmNum = Number(xlmAmount);
-  const usdcAmount = usdcEquivalent ? Number(usdcEquivalent) : xlmNum * XLM_USD_RATE;
+  
+  // Fetch live rate dynamically for this specific transaction
+  const liveXlmUsdRate = await getXlmUsdRate();
+  const usdcAmount = usdcEquivalent ? Number(usdcEquivalent) : xlmNum * liveXlmUsdRate;
 
   // OnRampSwap delegate; run npx prisma generate if types are missing
-  const swap = await (prisma as any).onRampSwap.findUnique({
+  const swap = await prisma.onRampSwap.findUnique({
     where: { id: onRampSwapId },
   });
   if (!swap || swap.status !== 'pending_convert') {
@@ -61,7 +94,7 @@ export async function processXlmToAcbu(payload: XlmToAcbuPayload): Promise<void>
     return;
   }
 
-  await (prisma as any).onRampSwap.update({
+  await prisma.onRampSwap.update({
     where: { id: onRampSwapId },
     data: { status: 'processing' },
   });
@@ -72,7 +105,7 @@ export async function processXlmToAcbu(payload: XlmToAcbuPayload): Promise<void>
       stellarAddress,
       userId
     );
-    await (prisma as any).onRampSwap.update({
+    await prisma.onRampSwap.update({
       where: { id: onRampSwapId },
       data: {
         status: 'completed',
@@ -88,7 +121,7 @@ export async function processXlmToAcbu(payload: XlmToAcbuPayload): Promise<void>
       transactionId,
     });
   } catch (e) {
-    await (prisma as any).onRampSwap.update({
+    await prisma.onRampSwap.update({
       where: { id: onRampSwapId },
       data: { status: 'failed' },
     });

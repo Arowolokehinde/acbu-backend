@@ -1,10 +1,10 @@
-import { Request, Response, NextFunction } from 'express';
-import { prisma } from '../config/database';
-import bcrypt from 'bcryptjs';
-import { AppError } from './errorHandler';
-import { logger } from '../config/logger';
+import { Request, Response, NextFunction } from "express";
+import { prisma } from "../config/database";
+import bcrypt from "bcryptjs";
+import { AppError } from "./errorHandler";
+import { logger } from "../config/logger";
 
-export type Audience = 'retail' | 'business' | 'government';
+export type Audience = "retail" | "business" | "government";
 
 export interface AuthRequest extends Request {
   apiKey?: {
@@ -24,13 +24,15 @@ export interface AuthRequest extends Request {
 export const validateApiKey = async (
   req: AuthRequest,
   _res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> => {
   try {
-    const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
+    const apiKey =
+      req.headers["x-api-key"] ||
+      req.headers["authorization"]?.replace("Bearer ", "");
 
-    if (!apiKey || typeof apiKey !== 'string') {
-      throw new AppError('API key is required', 401);
+    if (!apiKey || typeof apiKey !== "string") {
+      throw new AppError("API key is required", 401);
     }
 
     // Find API key in database
@@ -38,10 +40,7 @@ export const validateApiKey = async (
       where: {
         keyHash: await hashApiKey(apiKey),
         revokedAt: null,
-        OR: [
-          { expiresAt: null },
-          { expiresAt: { gt: new Date() } },
-        ],
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
       include: {
         user: true,
@@ -50,7 +49,7 @@ export const validateApiKey = async (
     });
 
     if (!apiKeyRecord) {
-      throw new AppError('Invalid API key', 401);
+      throw new AppError("Invalid API key", 401);
     }
 
     // Update last used timestamp
@@ -83,9 +82,12 @@ export async function hashApiKey(apiKey: string): Promise<string> {
 /**
  * Generate a new API key
  */
-export async function generateApiKey(userId?: string, permissions: string[] = []): Promise<string> {
-  const crypto = await import('crypto');
-  const apiKey = `acbu_${crypto.randomBytes(32).toString('hex')}`;
+export async function generateApiKey(
+  userId?: string,
+  permissions: string[] = [],
+): Promise<string> {
+  const crypto = await import("crypto");
+  const apiKey = `acbu_${crypto.randomBytes(32).toString("hex")}`;
   const keyHash = await hashApiKey(apiKey);
 
   await prisma.apiKey.create({
@@ -96,6 +98,9 @@ export async function generateApiKey(userId?: string, permissions: string[] = []
     },
   });
 
-  logger.info('API key generated', { userId, hasPermissions: permissions.length > 0 });
+  logger.info("API key generated", {
+    userId,
+    hasPermissions: permissions.length > 0,
+  });
   return apiKey;
 }

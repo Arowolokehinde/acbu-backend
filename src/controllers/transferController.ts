@@ -1,16 +1,18 @@
-import { Response, NextFunction } from 'express';
-import { z } from 'zod';
-import { AuthRequest } from '../middleware/auth';
-import { createTransfer } from '../services/transfer/transferService';
-import { prisma } from '../config/database';
-import { AppError } from '../middleware/errorHandler';
+import { Response, NextFunction } from "express";
+import { z } from "zod";
+import { AuthRequest } from "../middleware/auth";
+import { createTransfer } from "../services/transfer/transferService";
+import { prisma } from "../config/database";
+import { AppError } from "../middleware/errorHandler";
 
 const createTransferSchema = z.object({
-  to: z.string().min(1, 'to is required'),
-  amount_acbu: z.string().min(1, 'amount_acbu is required').refine(
-    (s) => !Number.isNaN(Number(s)) && Number(s) > 0,
-    { message: 'amount_acbu must be a positive number' }
-  ),
+  to: z.string().min(1, "to is required"),
+  amount_acbu: z
+    .string()
+    .min(1, "amount_acbu is required")
+    .refine((s) => !Number.isNaN(Number(s)) && Number(s) > 0, {
+      message: "amount_acbu must be a positive number",
+    }),
 });
 
 /**
@@ -21,12 +23,12 @@ const createTransferSchema = z.object({
 export async function postTransfers(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     const userId = req.apiKey?.userId;
     if (!userId) {
-      throw new AppError('User-scoped API key required', 401);
+      throw new AppError("User-scoped API key required", 401);
     }
     const body = createTransferSchema.parse(req.body);
     const result = await createTransfer(
@@ -34,7 +36,7 @@ export async function postTransfers(
         senderUserId: userId,
         to: body.to.trim(),
         amountAcbu: body.amount_acbu.trim(),
-      }
+      },
       // getSenderSigningKey not passed: tx stays pending until key/worker is wired
     );
     res.status(201).json({
@@ -43,13 +45,20 @@ export async function postTransfers(
     });
   } catch (e) {
     if (e instanceof z.ZodError) {
-      const msg = e.errors.map((x) => x.message).join('; ');
+      const msg = e.errors.map((x) => x.message).join("; ");
       return next(new AppError(msg, 400));
     }
-    if (e instanceof Error && (e.message === 'Recipient not found or not available' || e.message === 'Sender user not found')) {
+    if (
+      e instanceof Error &&
+      (e.message === "Recipient not found or not available" ||
+        e.message === "Sender user not found")
+    ) {
       return next(new AppError(e.message, 404));
     }
-    if (e instanceof Error && e.message.includes('KYC required to make payments')) {
+    if (
+      e instanceof Error &&
+      e.message.includes("KYC required to make payments")
+    ) {
       return next(new AppError(e.message, 403));
     }
     next(e);
@@ -63,16 +72,16 @@ export async function postTransfers(
 export async function getTransfers(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     const userId = req.apiKey?.userId;
     if (!userId) {
-      throw new AppError('User-scoped API key required', 401);
+      throw new AppError("User-scoped API key required", 401);
     }
     const list = await prisma.transaction.findMany({
-      where: { userId, type: 'transfer' },
-      orderBy: { createdAt: 'desc' },
+      where: { userId, type: "transfer" },
+      orderBy: { createdAt: "desc" },
       take: 50,
       select: {
         id: true,
@@ -106,16 +115,16 @@ export async function getTransfers(
 export async function getTransferById(
   req: AuthRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     const userId = req.apiKey?.userId;
     if (!userId) {
-      throw new AppError('User-scoped API key required', 401);
+      throw new AppError("User-scoped API key required", 401);
     }
     const { id } = req.params;
     const tx = await prisma.transaction.findFirst({
-      where: { id, userId, type: 'transfer' },
+      where: { id, userId, type: "transfer" },
       select: {
         id: true,
         status: true,
@@ -127,7 +136,7 @@ export async function getTransferById(
       },
     });
     if (!tx) {
-      throw new AppError('Transfer not found', 404);
+      throw new AppError("Transfer not found", 404);
     }
     res.json({
       transaction_id: tx.id,

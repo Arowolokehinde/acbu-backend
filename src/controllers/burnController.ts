@@ -84,7 +84,11 @@ export async function burnAcbu(
         localCurrency: currency,
         recipientAccount: recipient_account as object,
         fee: new Decimal(feeAcbu),
-        rateSnapshot: { acbu_ngn: null, timestamp: new Date().toISOString() },
+        rateSnapshot: {
+          acbu_ngn: null,
+          organizationId: req.apiKey?.organizationId ?? null,
+          timestamp: new Date().toISOString(),
+        },
       },
     });
     await logAudit({

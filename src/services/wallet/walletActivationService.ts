@@ -6,6 +6,7 @@
 import { Operation, TransactionBuilder } from "stellar-sdk";
 import { config } from "../../config/env";
 import { stellarClient } from "../stellar/client";
+import { getBaseFee } from "../stellar/feeManager";
 import { logger } from "../../config/logger";
 
 /**
@@ -31,7 +32,7 @@ export async function sendXlmToActivate(
   });
 
   const builder = new TransactionBuilder(sourceAccount, {
-    fee: "100",
+    fee: await getBaseFee(),
     networkPassphrase,
   }).addOperation(op);
   const transaction = builder.build();

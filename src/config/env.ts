@@ -110,6 +110,10 @@ export const config = {
         process.env.STELLAR_MIN_BALANCE ||
         "1",
     ),
+    /** Base transaction fee in stroops used as fallback when dynamic fee fetch is disabled or fails. Default 100. */
+    baseFeeStroops: parseInt(process.env.STELLAR_BASE_FEE_STROOPS || "100", 10),
+    /** When true, fetches the current recommended base fee from Horizon before each transaction. Falls back to baseFeeStroops on failure. */
+    useDynamicFees: process.env.STELLAR_USE_DYNAMIC_FEES === "true",
   },
 
   // Oracle (40/40/20: central bank, fintech, forex)

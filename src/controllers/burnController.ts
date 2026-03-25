@@ -56,24 +56,28 @@ export async function burnAcbu(
     const feeAcbu = (acbuNum * burnFeeBps) / 10000;
     const acbuAmount7 = Math.round(acbuNum * DECIMALS_7).toString();
 
-    if (req.audience) {
-      const paused = await isCurrencyWithdrawalPaused(currency);
-      if (paused) {
-        res.status(503).json({
-          error: "Withdrawal paused for currency",
-          code: "CIRCUIT_BREAKER",
-          message: `Single-currency withdrawals for ${currency} are temporarily paused (reserve below threshold). Basket withdrawals continue.`,
-        });
-        return;
-      }
-      await checkWithdrawalLimits(
-        req.audience,
-        acbuNum,
-        currency,
-        req.apiKey?.userId ?? null,
-        req.apiKey?.organizationId ?? null,
-      );
+    // SECURITY: Always enforce circuit breaker and withdrawal limits
+    // Previously these checks were skipped when req.audience was undefined,
+    // allowing bypass of critical financial controls via direct /burn/acbu route
+    const paused = await isCurrencyWithdrawalPaused(currency);
+    if (paused) {
+      res.status(503).json({
+        error: "Withdrawal paused for currency",
+        code: "CIRCUIT_BREAKER",
+        message: `Single-currency withdrawals for ${currency} are temporarily paused (reserve below threshold). Basket withdrawals continue.`,
+      });
+      return;
     }
+
+    // Apply withdrawal limits - use retail as default if no audience is set
+    const audience = req.audience || "retail";
+    await checkWithdrawalLimits(
+      audience,
+      acbuNum,
+      currency,
+      req.apiKey?.userId ?? null,
+      req.apiKey?.organizationId ?? null,
+    );
 
     const tx = await prisma.transaction.create({
       data: {
@@ -84,7 +88,11 @@ export async function burnAcbu(
         localCurrency: currency,
         recipientAccount: recipient_account as object,
         fee: new Decimal(feeAcbu),
-        rateSnapshot: { acbu_ngn: null, timestamp: new Date().toISOString() },
+        rateSnapshot: {
+          acbu_ngn: null,
+          organizationId: req.apiKey?.organizationId ?? null,
+          timestamp: new Date().toISOString(),
+        },
       },
     });
     await logAudit({

@@ -83,16 +83,10 @@ export async function processXlmToAcbu(
   const { onRampSwapId, userId, stellarAddress, xlmAmount, usdcEquivalent } =
     payload;
   const xlmNum = Number(xlmAmount);
-<<<<<<< fix/issue-53-hardcoded-xlm-rate
   
   // Fetch live rate dynamically for this specific transaction
   const liveXlmUsdRate = await getXlmUsdRate();
   const usdcAmount = usdcEquivalent ? Number(usdcEquivalent) : xlmNum * liveXlmUsdRate;
-=======
-  const usdcAmount = usdcEquivalent
-    ? Number(usdcEquivalent)
-    : xlmNum * XLM_USD_RATE;
->>>>>>> main
 
   // OnRampSwap delegate; run npx prisma generate if types are missing
   const swap = await prisma.onRampSwap.findUnique({

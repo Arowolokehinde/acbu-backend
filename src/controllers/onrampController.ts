@@ -51,8 +51,7 @@ export async function registerOnRampSwap(
     }
     const { stellar_address, xlm_amount, usdc_amount } = parsed.data;
     const xlmNum = Number(xlm_amount);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- OnRampSwap delegate; run npx prisma generate
-    const swap = await (prisma as any).onRampSwap.create({
+    const swap = await prisma.onRampSwap.create({
       data: {
         userId,
         stellarAddress: stellar_address,

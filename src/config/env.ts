@@ -2,6 +2,27 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// ── Validate required env vars BEFORE building config ────────────────────────
+// This ensures the app fails fast with a clear message instead of starting
+// with empty strings and failing later in an unpredictable way.
+const requiredEnvVars = [
+  "DATABASE_URL",
+  "MONGODB_URI",
+  "RABBITMQ_URL",
+  "JWT_SECRET",
+];
+
+if (process.env.NODE_ENV === "production") {
+  requiredEnvVars.push("PRISMA_ACCELERATE_URL");
+}
+
+const missing = requiredEnvVars.filter((v) => !process.env[v]);
+if (missing.length > 0) {
+  throw new Error(
+    `Missing required environment variable(s): ${missing.join(", ")}`,
+  );
+}
+
 export const config = {
   // Server
   nodeEnv: process.env.NODE_ENV || "development",
@@ -304,21 +325,3 @@ export const config = {
   // CORS
   corsOrigin: process.env.CORS_ORIGIN?.split(",") || ["http://localhost:3000"],
 };
-
-// Validate required environment variables
-const requiredEnvVars = [
-  "DATABASE_URL",
-  "MONGODB_URI",
-  "RABBITMQ_URL",
-  "JWT_SECRET",
-];
-
-if (config.nodeEnv === "production") {
-  requiredEnvVars.push("PRISMA_ACCELERATE_URL");
-}
-
-for (const envVar of requiredEnvVars) {
-  if (!process.env[envVar]) {
-    throw new Error(`Missing required environment variable: ${envVar}`);
-  }
-}
